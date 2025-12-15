@@ -1,33 +1,41 @@
 import pandas as pd
+import os
 
-rain = pd.read_csv("data/rainfall.csv")[[
-    "Area", "Year", "average_rain_fall_mm_per_year"
-]]
+DATA_DIR = "data"
 
-yield_df = pd.read_csv("data/yield.csv")[[
-    "Area", "Item", "Year", "Value"
-]].rename(columns={"Value": "Yield"})
+columns = [
+    "STATION",
+    "DATE",
+    "LATITUDE",
+    "LONGITUDE",
+    "TMP",
+    "DEW",
+    "SLP",
+    "WND",
+    "VIS",
+    "AA1"
+]
 
-temp = pd.read_csv("data/temp.csv").rename(columns={
-    "country": "Area",
-    "year": "Year"
-})
+dfs = []  # collect yearly dataframes
 
-pest = pd.read_csv("data/pesticides.csv")[[
-    "Area", "Year", "Value"
-]]
+for f in os.listdir(DATA_DIR):
+    if f.endswith(".csv"):
+        file_path = os.path.join(DATA_DIR, f)
+        print(f"Reading {file_path}")
 
+        df = pd.read_csv(
+            file_path,
+            usecols=columns,      # only load needed columns
+            low_memory=False
+        )
 
-#combining data sets
-df = yield_df.merge(rain, on=["Area","Year"], how="inner")
-df = df.merge(temp, on=["Area","Year"], how="inner")
-df = df.merge(pest, on=["Area","Year"], how="inner")
+        dfs.append(df)
 
-df = df.dropna()
+# Combine all years
+combined_df = pd.concat(dfs, ignore_index=True)
 
-#size of data set
-df = df[df['Area']=='Uganda']
-print(df.shape)
+combined_df.to_csv('combined_data.csv', index=False)
 
+print("Combined shape:", combined_df.shape)
+    
 
-print(df.head(10))
