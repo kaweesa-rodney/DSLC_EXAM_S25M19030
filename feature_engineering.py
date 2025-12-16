@@ -8,6 +8,9 @@ spark = SparkSession.builder.appName("HourlyFeatures").master("local[2]")\
 
 df = spark.read.csv("output/data/cleaned_weather.csv", header=True, inferSchema=True)
 
+#convert date to timestamp
+df = df.withColumn("DATE", to_timestamp("DATE"))
+
 #derived column
 df = df.withColumn("temp_dew_spread", col("tmp_c") - col("dew_c"))
 
@@ -15,15 +18,19 @@ df = df.withColumn("hour", hour("DATE"))
 df = df.withColumn("day_of_year", dayofyear("DATE"))
 
 
-# Rolling windows (hourly)
-w3 = Window.orderBy("DATE").rowsBetween(-3, 0)
-w6 = Window.orderBy("DATE").rowsBetween(-6, 0)
-w12 = Window.orderBy("DATE").rowsBetween(-12, 0)
-w24 = Window.orderBy("DATE").rowsBetween(-24, 0)
-w72 = Window.orderBy("DATE").rowsBetween(-72, 0)
+# Ensure rainfall is numeric
+df = df.withColumn("precip_mm", col("precip_mm").cast("double"))
 
-df = df.withColumn("rain_3h", sum("precip_mm").over(w3))
-df = df.withColumn("rain_6h", sum("precip_mm").over(w6))
+# Define rolling windows in seconds
+w3  = Window.partitionBy("STATION").orderBy(col("DATE").cast("long")).rangeBetween(-3*3600, 0)
+w6  = Window.partitionBy("STATION").orderBy(col("DATE").cast("long")).rangeBetween(-6*3600, 0)
+w12 = Window.partitionBy("STATION").orderBy(col("DATE").cast("long")).rangeBetween(-12*3600, 0)
+w24 = Window.partitionBy("STATION").orderBy(col("DATE").cast("long")).rangeBetween(-24*3600, 0)
+w72 = Window.partitionBy("STATION").orderBy(col("DATE").cast("long")).rangeBetween(-72*3600, 0)
+
+# Apply rolling rainfall sums
+df = df.withColumn("rain_3h",  sum("precip_mm").over(w3))
+df = df.withColumn("rain_6h",  sum("precip_mm").over(w6))
 df = df.withColumn("rain_12h", sum("precip_mm").over(w12))
 df = df.withColumn("rain_24h", sum("precip_mm").over(w24))
 df = df.withColumn("rain_72h", sum("precip_mm").over(w72))
