@@ -1,9 +1,10 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, percentile_approx, when
+from pyspark.sql.functions import col, percentile_approx, when, lag
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.classification import LogisticRegression, RandomForestClassifier
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
 from pyspark.ml import Pipeline
+from pyspark.sql.window import Window
 
 spark = SparkSession.builder \
     .appName("DualHazardTraining") \
@@ -20,6 +21,14 @@ df = spark.read.csv(
 # DERIVED FEATURES
 # --------------------------------------------------
 df = df.withColumn("TEMP_DEW_SPREAD", col("TMP_C") - col("DEW_C"))
+
+w = Window.orderBy("DATE")
+
+df = df.withColumn("TMP_LAG_1H", lag("TMP_C", 1).over(w))
+df = df.withColumn("TMP_LAG_3H", lag("TMP_C", 3).over(w))
+df = df.withColumn("TMP_LAG_6H", lag("TMP_C", 6).over(w))
+
+df = df.dropna(subset=["TMP_LAG_1H", "TMP_LAG_3H", "TMP_LAG_6H"])
 
 # --------------------------------------------------
 # LABELS / OUTCOMES (TROPICAL THRESHOLDS)
@@ -46,8 +55,9 @@ df = df.withColumn(
 # FEATURES (NO LEAKAGE)
 # --------------------------------------------------
 heat_features = [
+    "TMP_LAG_1H",
+    "TMP_LAG_3H",
     "DEW_C",
-    "TEMP_DEW_SPREAD",
     "WIND_MS",
     "VIS_M"
 ]
@@ -88,14 +98,12 @@ df = df.withColumn(
     when(col("FLOOD_EVENT") == 1, flood_neg / flood_pos).otherwise(1.0)
 )
 
-# --------------------------------------------------
-# TRAIN / TEST SPLIT
-# --------------------------------------------------
+
+# TRAIN TEST SPLIT
 train, test = df.randomSplit([0.8, 0.2], seed=42)
 
-# --------------------------------------------------
+
 # PIPELINE TRAINING FUNCTION (NO SCALING)
-# --------------------------------------------------
 def train_model(feature_cols, label_col, model):
     assembler = VectorAssembler(
         inputCols=feature_cols,
@@ -109,9 +117,8 @@ def train_model(feature_cols, label_col, model):
     pipeline = Pipeline(stages=[assembler, model])
     return pipeline.fit(train)
 
-# --------------------------------------------------
-# TRAIN MODELS
-# --------------------------------------------------
+
+# TRAINING
 heat_lr = train_model(
     heat_features,
     "HEAT_EVENT",
@@ -182,10 +189,10 @@ metrics = {
 for k, v in metrics.items():
     print(f"{k} AUC: {v:.3f}")
 
-"""
-heat_best = heat_rf if metrics["Heat_RF"] > metrics["Heat_LR"] else heat_lr
-flood_best = flood_rf if metrics["Flood_RF"] > metrics["Flood_LR"] else flood_lr
+
+heat_best = heat_rf
+flood_best = flood_rf
 
 heat_best.write().overwrite().save("outputs/models/heat_model")
 flood_best.write().overwrite().save("outputs/models/flood_model")
-"""
+
